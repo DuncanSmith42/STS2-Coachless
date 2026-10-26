@@ -20,7 +20,7 @@ public class TablePanel extends JPanel {
     private final SaveFileManager saves;
     private final DefaultTableModel model;
     private final BiFunction<List<ProgressSave>, String, List<Object[]>> rows;
-    private final JComboBox<String> characterBox;   // null when there is no character filter
+    private final JComboBox<String> characterBox;
     private final JLabel status = new JLabel();
     private final TableRowSorter<DefaultTableModel> sorter;
     private final JTextField search = new JTextField(18);

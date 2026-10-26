@@ -8,13 +8,11 @@ import coachless.ui.LivePanel;
 import coachless.ui.SourcesBar;
 import coachless.ui.CardPanel;
 import coachless.ui.MonsterPanel;
+import coachless.data.ProgressFileType;
 
 import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-/**
- * Main window. To add a feature: write a JPanel in coachless.ui, then add ONE line in the constructor: tabs.addTab("Name", new YourPanel());
- */
 
 public class MainFrame extends JFrame {
 
@@ -23,7 +21,7 @@ public class MainFrame extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setPreferredSize(new Dimension(900, 600));
 
-        SaveFileManager saves = new SaveFileManager();
+        SaveFileManager saves = new SaveFileManager(new ProgressFileType());
         PersonalStats personal = new PersonalStats(saves);
 
         JTabbedPane tabs = new JTabbedPane();

@@ -9,60 +9,94 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.prefs.Preferences;
+import java.io.UncheckedIOException;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Stream;
+
 
 
 public final class SaveFileManager {
 
-    //One file the user gave us, plus what we got out of it (or why it failed).
+    //One folder the user gives us, plus what we got out of it
     public static final class Entry {
         public final Path path;
+        public final FileType type;
         public ProgressSave data;
         public String error;
         long modified = Long.MIN_VALUE;
 
-        Entry(Path path) { this.path = path; }
+        Entry(Path path, FileType type) { this.path = path; this.type = type; }
     }
 
-    private static final String PREF_KEY = "files";
-    private final Preferences prefs = Preferences.userNodeForPackage(SaveFileManager.class);
-    private final List<Entry> entries = new ArrayList<>();
-    private final List<Runnable> listeners = new ArrayList<>();
+    public static final class Folder {
+        public final Path path;
+        public final List<Entry> files = new ArrayList<>();
+        public String error;
 
-    public SaveFileManager() {
+        Folder(Path path) { this.path = path; }
+    }
+
+    private static final String PREF_KEY = "folders";
+    private static final int MAX_DEPTH = 6;          
+    private static final int MAX_VISITED = 20000;    
+    private static final int RESCAN_EVERY = 5;
+
+    private final Preferences prefs = Preferences.userNodeForPackage(SaveFileManager.class);
+    private final List<FileType> types;
+    private final List<Folder> folders = new ArrayList<>();
+    private final List<Runnable> listeners = new ArrayList<>();
+    private int tick;
+
+    public SaveFileManager(FileType... types) {
+        this.types = List.of(types);
         for (String p : prefs.get(PREF_KEY, "").split("\n")) {
-            if (!p.isBlank()) {
-                Entry e = new Entry(Paths.get(p));
-                reload(e);
-                entries.add(e);
-            }
+            if (p.isBlank()) continue;
+            try {
+                Folder f = new Folder(Paths.get(p));
+                rescan(f);
+                folders.add(f);
+            } catch (RuntimeException ignored) {}
         }
         Timer timer = new Timer(2000, ev -> poll());
         timer.setCoalesce(true);
         timer.start();
     }
 
-    public List<Entry> entries() { return Collections.unmodifiableList(entries); }
+    public List<Folder> folders() { return Collections.unmodifiableList(folders); }
 
-    public List<ProgressSave> validSaves() {
-        List<ProgressSave> out = new ArrayList<>();
-        for (Entry e : entries) if (e.data != null) out.add(e.data);
+    public <T> List<T> valid(Class<T> kind) {
+        List<T> out = new ArrayList<>();
+        Set<Path> seen = new HashSet<>();
+        for (Folder f : folders) {
+            for (Entry e : f.files) {
+                if (kind.isInstance(e.data) && seen.add(e.path)) out.add(kind.cast(e.data));
+            }
+        }
         return out;
     }
 
+    public List<ProgressSave> validSaves() { return valid(ProgressSave.class); }
+
     public void addListener(Runnable r) { listeners.add(r); }
 
-    public void add(Path path) {
+    public void addFolder(Path path) {
         Path p = path.toAbsolutePath().normalize();
-        for (Entry e : entries) if (e.path.equals(p)) return;
-        Entry e = new Entry(p);
-        reload(e);
-        entries.add(e);
+        for (Folder f : folders) if (f.path.equals(p)) return;
+        Folder f = new Folder(p);
+        rescan(f);
+        folders.add(f);
         persist();
         fire();
     }
 
-    public void remove(Entry e) {
-        if (entries.remove(e)) {
+    public void remove(Folder f) {
+        if (folders.remove(f)) {
             persist();
             fire();
         }
@@ -71,21 +105,70 @@ public final class SaveFileManager {
     //Internals
     private void poll() {
         boolean changed = false;
-        for (Entry e : entries) {
-            long m;
-            try {
-                m = Files.getLastModifiedTime(e.path).toMillis();
-            } catch (IOException ex) {
-                if (e.error == null) { e.data = null; e.error = "File not found"; changed = true; }
-                e.modified = Long.MIN_VALUE;
-                continue;
-            }
-            if (m != e.modified) {
-                reload(e);
-                changed = true;
+        boolean rescan = ++tick % RESCAN_EVERY == 0;
+        for (Folder f : folders) {
+            for (Entry e : f.files) {
+                try {
+                    long m = Files.getLastModifiedTime(e.path).toMillis();
+                    if (m != e.modified) {
+                        reload(e);
+                        changed = true;
+                    }
+                } catch (IOException ex) {
+                    rescan = true;
+                }
             }
         }
+        if (rescan) {
+            for (Folder f : folders) changed |= rescan(f);
+        }
         if (changed) fire();
+    }
+
+    private boolean rescan(Folder f) {
+        Map<Path, Entry> old = new HashMap<>();
+        for (Entry e : f.files) old.put(e.path, e);
+ 
+        List<Entry> found = new ArrayList<>();
+        String err = null;
+        if (!Files.isDirectory(f.path)) {
+            err = "Folder not found";
+        } else {
+            try (Stream<Path> walk = Files.walk(f.path, MAX_DEPTH)) {
+                Iterator<Path> it = walk.limit(MAX_VISITED).iterator();
+                while (it.hasNext()) {
+                    Path p = it.next();
+                    if (!Files.isRegularFile(p)) continue;
+                    Entry e = old.get(p);
+                    if (e == null) {
+                        FileType t = typeOf(p);
+                        if (t == null) continue;
+                        e = new Entry(p, t);
+                        reload(e);
+                    }
+                    found.add(e);
+                }
+            } catch (IOException | UncheckedIOException ex) {
+                boolean changed = !Objects.equals("Can't read folder", f.error);
+                f.error = "Can't read folder";
+                return changed;
+            }
+        }
+ 
+        found.sort(Comparator.comparing(e -> e.path));
+        Set<Path> after = new HashSet<>();
+        for (Entry e : found) after.add(e.path);
+        boolean changed = !old.keySet().equals(after) || !Objects.equals(err, f.error);
+ 
+        f.files.clear();
+        f.files.addAll(found);
+        f.error = err;
+        return changed;
+    }
+
+        private FileType typeOf(Path p) {
+        for (FileType t : types) if (t.matches(p)) return t;
+        return null;
     }
 
     private void reload(Entry e) {
@@ -101,7 +184,7 @@ public final class SaveFileManager {
 
     private void persist() {
         StringBuilder sb = new StringBuilder();
-        for (Entry e : entries) sb.append(e.path).append('\n');
+        for (Folder f : folders) sb.append(f.path).append('\n');
         prefs.put(PREF_KEY, sb.toString());
     }
 

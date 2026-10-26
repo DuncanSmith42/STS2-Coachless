@@ -1,23 +1,27 @@
 package coachless.ui;
 
-import coachless.data.SaveFileManager;
-
-import javax.swing.*;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.RenderingHints;
 import java.awt.datatransfer.DataFlavor;
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Stream;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.TransferHandler;
+import javax.swing.UIManager;
 
-/**
- * Strip at the top of the window: "Add save file..." button plus one chip per
- * progress.save the user gave us (click x to remove). Files can also be dragged
- * onto the window - see installFileDrop().
- */
+import coachless.data.SaveFileManager;
+
 public class SourcesBar extends JPanel {
     private static final Color BAD = new Color(0xF87171);
 
@@ -29,8 +33,8 @@ public class SourcesBar extends JPanel {
         this.saves = saves;
         setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
 
-        JButton addBtn = new JButton("Add save file...");
-        addBtn.addActionListener(e -> chooseFiles());
+        JButton addBtn = new JButton("Add folder...");
+        addBtn.addActionListener(e -> chooseFolders());
         chips.setOpaque(false);
 
         add(addBtn, BorderLayout.WEST);
@@ -42,17 +46,23 @@ public class SourcesBar extends JPanel {
 
     private void rebuild() {
         chips.removeAll();
-        if (saves.entries().isEmpty()) {
-            JLabel hint = new JLabel("Drag your progress.save file(s) onto this window, or click Add");
+        if (saves.folders().isEmpty()) {
+            JLabel hint = new JLabel("Add the folder that holds your save files (we find the files inside). You can also drag a folder onto this window.");
             hint.setForeground(UIManager.getColor("Label.disabledForeground"));
             chips.add(hint);
         }
-        for (SaveFileManager.Entry e : saves.entries()) chips.add(chip(e));
+        for (SaveFileManager.Folder f : saves.folders()) chips.add(chip(f));
         chips.revalidate();
         chips.repaint();
     }
 
-    private JComponent chip(SaveFileManager.Entry e) {
+    private JComponent chip(SaveFileManager.Folder f) {
+        int n = f.files.size();
+        String problem = f.error != null ? f.error : (n == 0 ? "No game files found in this folder" : null);
+        boolean fileProblem = false;
+        for (SaveFileManager.Entry e : f.files) if (e.error != null) fileProblem = true;
+        boolean bad = problem != null || fileProblem;
+ 
         JPanel p = new JPanel(new BorderLayout(4, 0)) {
             @Override protected void paintComponent(Graphics g0) {
                 Graphics2D g = (Graphics2D) g0.create();
@@ -64,35 +74,47 @@ public class SourcesBar extends JPanel {
         };
         p.setOpaque(false);
         p.setBorder(BorderFactory.createEmptyBorder(3, 12, 3, 4));
-        p.setToolTipText(e.error == null ? e.path.toString() : e.path + "  -  " + e.error);
-
-        JLabel name = new JLabel((e.error == null ? "" : "(!) ") + shortName(e.path));
-        if (e.error != null) name.setForeground(BAD);
-
-        JButton x = new JButton("×");
+ 
+        StringBuilder tip = new StringBuilder("<html>").append(esc(f.path.toString()));
+        if (problem != null) tip.append("<br>").append(esc(problem));
+        for (SaveFileManager.Entry e : f.files) {
+            tip.append("<br>").append(esc(f.path.relativize(e.path).toString().replace('\\', '/')
+                    + (e.error == null ? "  -  OK" : "  -  " + e.error)));
+        }
+        p.setToolTipText(tip.toString());
+ 
+        JLabel name = new JLabel((bad ? "(!) " : "") + shortName(f.path)
+                + "  -  " + n + (n == 1 ? " file" : " files"));
+        if (bad) name.setForeground(BAD);
+ 
+        JButton x = new JButton("\u00D7");
         x.setToolTipText("Remove");
         x.setBorderPainted(false);
         x.setContentAreaFilled(false);
         x.setFocusable(false);
         x.setMargin(new Insets(0, 4, 0, 4));
-        x.addActionListener(ev -> saves.remove(e));
-
+        x.addActionListener(ev -> saves.remove(f));
+ 
         p.add(name, BorderLayout.CENTER);
         p.add(x, BorderLayout.EAST);
         return p;
     }
 
-    /** Last 3 parts of the path, e.g. "profile1/saves/progress.save". */
     private static String shortName(Path p) {
         int n = p.getNameCount();
-        return p.subpath(Math.max(0, n - 3), n).toString().replace('\\', '/');
+        if (n == 0) return p.toString();
+        return p.subpath(Math.max(0, n - 2), n).toString().replace('\\', '/');
     }
 
-    private void chooseFiles() {
+    private static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private void chooseFolders() {
         JFileChooser fc = new JFileChooser();
         fc.setMultiSelectionEnabled(true);
-        fc.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-        fc.setDialogTitle("Choose progress.save file(s) or a folder that contains them");
+        fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        fc.setDialogTitle("Choose the folder that contains your save files");
         if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             addAll(saves, fc.getSelectedFiles());
         }
@@ -100,20 +122,11 @@ public class SourcesBar extends JPanel {
 
     //shared by the button and drag and drop
 
-    //A file is added as is. A folder is searched for progress.save files inside it.
+    //A folder is added as is. If a file is give the folder is adde instead.
     static void addAll(SaveFileManager saves, File... files) {
         for (File f : files) {
-            if (f.isDirectory()) {
-                try (Stream<Path> walk = Files.walk(f.toPath(), 6)) {
-                    List<Path> found = new ArrayList<>();
-                    walk.filter(p -> p.getFileName().toString().equals("progress.save")
-                            && Files.isRegularFile(p)).forEach(found::add);
-                    found.forEach(saves::add);
-                } catch (IOException ignored) {
-                }
-            } else {
-                saves.add(f.toPath());
-            }
+            Path dir = f.isDirectory() ? f.toPath() : f.toPath().getParent();
+            if (dir != null) saves.addFolder(dir);
         }
     }
 
