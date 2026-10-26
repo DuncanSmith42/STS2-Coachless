@@ -41,9 +41,9 @@ public class LivePanel extends JPanel {
         watcher.start();
     }
 
-    /** Called on the Swing thread each time the run file changes. */
+    //Called on the Swing thread each time the run file changes.
     private void onRunUpdate(String json) {
-        output.setText(json); // replace with parsing + suggestions
+        output.setText(json);
         output.setCaretPosition(0);
     }
 }

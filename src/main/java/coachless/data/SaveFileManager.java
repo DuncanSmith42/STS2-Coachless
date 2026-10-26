@@ -77,7 +77,7 @@ public final class SaveFileManager {
                 m = Files.getLastModifiedTime(e.path).toMillis();
             } catch (IOException ex) {
                 if (e.error == null) { e.data = null; e.error = "File not found"; changed = true; }
-                e.modified = Long.MIN_VALUE;   // re-read as soon as it comes back
+                e.modified = Long.MIN_VALUE;
                 continue;
             }
             if (m != e.modified) {

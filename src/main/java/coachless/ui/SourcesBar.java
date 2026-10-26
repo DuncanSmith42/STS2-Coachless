@@ -98,9 +98,9 @@ public class SourcesBar extends JPanel {
         }
     }
 
-    // ---- shared by the button and drag-and-drop --------------------------
+    //shared by the button and drag and drop
 
-    /** A file is added as-is. A folder is searched for progress.save files inside it. */
+    //A file is added as is. A folder is searched for progress.save files inside it.
     static void addAll(SaveFileManager saves, File... files) {
         for (File f : files) {
             if (f.isDirectory()) {
@@ -117,7 +117,7 @@ public class SourcesBar extends JPanel {
         }
     }
 
-    /** Make a component (e.g. the window's content pane) accept dropped files and folders. */
+    //accept dropped files and folders.
     public static void installFileDrop(JComponent target, SaveFileManager saves) {
         target.setTransferHandler(new TransferHandler() {
             @Override public boolean canImport(TransferSupport s) {

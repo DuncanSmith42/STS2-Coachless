@@ -10,7 +10,6 @@ public class GlobalStats implements StatsProvider {
         Map<String, Double> m = new LinkedHashMap<>();
         m.put("Win rate %", 18.0);
         m.put("Avg run time", 27.1);
-        m.put("Avg floors reached", 31.0);
         m.put("Best win streak", 5.0);
         return m;
     }

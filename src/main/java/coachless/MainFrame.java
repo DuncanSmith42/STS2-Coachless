@@ -6,6 +6,9 @@ import coachless.data.SaveFileManager;
 import coachless.ui.ComparePanel;
 import coachless.ui.LivePanel;
 import coachless.ui.SourcesBar;
+import coachless.ui.CardPanel;
+import coachless.ui.MonsterPanel;
+
 import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -25,6 +28,8 @@ public class MainFrame extends JFrame {
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Compare", new ComparePanel(personal, new GlobalStats()));
+        tabs.addTab("Monsters", new MonsterPanel(saves));
+        tabs.addTab("Cards", new CardPanel(saves));
         tabs.addTab("Live Run", new LivePanel());
 
         add(new SourcesBar(saves), BorderLayout.NORTH);

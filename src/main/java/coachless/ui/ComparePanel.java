@@ -5,7 +5,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Map;
 
-/** One rounded card per stat: your value vs global, with bars and a +/- badge. */
+// One rounded card per stat: your value vs global, with bars and a +/- badge.
 public class ComparePanel extends JPanel {
     private static final Color YOU = new Color(0x7C9CFF);
     private static final Color GLOBAL = new Color(0x5B6178);
@@ -54,12 +54,12 @@ public class ComparePanel extends JPanel {
             empty.setForeground(UIManager.getColor("Label.disabledForeground"));
             body.add(empty, BorderLayout.NORTH);
         } else {
-            JPanel grid = new JPanel(new GridLayout(0, 2, 16, 16));   // 2 cards per row
+            JPanel grid = new JPanel(new GridLayout(0, 2, 16, 16));
             grid.setOpaque(false);
             for (String stat : mine.keySet()) {
                 grid.add(new StatCard(stat, mine.get(stat), theirs.getOrDefault(stat, 0.0)));
             }
-            body.add(grid, BorderLayout.NORTH);   // keeps cards at natural height
+            body.add(grid, BorderLayout.NORTH);
         }
         body.revalidate();
         body.repaint();

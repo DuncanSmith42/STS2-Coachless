@@ -31,13 +31,15 @@ public class RunFileWatcher {
         try (WatchService ws = FileSystems.getDefault().newWatchService()) {
             Path dir = file.getParent();
             dir.register(ws, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_MODIFY);
-            readAndNotify(); // initial read if file already exists
+            //initial read if file already exists
+            readAndNotify(); 
             while (running) {
                 WatchKey key = ws.take();
                 for (WatchEvent<?> ev : key.pollEvents()) {
                     Object ctx = ev.context();
                     if (ctx instanceof Path && dir.resolve((Path) ctx).equals(file)) {
-                        Thread.sleep(150); // let the game finish writing
+                        //Wait for the game to finish writing
+                        Thread.sleep(150);
                         readAndNotify();
                     }
                 }
@@ -53,7 +55,7 @@ public class RunFileWatcher {
         try {
             if (Files.exists(file)) onChange.accept(Files.readString(file));
         } catch (IOException ignored) {
-            // file mid-write; next modify event will retry
+            // file mid-write. Next modify event will retry
         }
     }
 }
