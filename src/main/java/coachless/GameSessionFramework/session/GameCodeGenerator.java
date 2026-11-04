@@ -1,4 +1,4 @@
-package GameSessionFramework.session;
+package coachless.GameSessionFramework.session;
 
 import java.security.SecureRandom;
 

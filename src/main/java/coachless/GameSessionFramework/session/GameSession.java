@@ -1,6 +1,6 @@
-package GameSessionFramework.session;
+package coachless.GameSessionFramework.session;
 
-import GameSessionFramework.Player;
+import coachless.GameSessionFramework.Player;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;

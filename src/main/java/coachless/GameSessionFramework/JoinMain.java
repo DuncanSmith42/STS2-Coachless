@@ -1,6 +1,6 @@
-package GameSessionFramework;
+package coachless.GameSessionFramework;
 
-import GameSessionFramework.Network.JoinClient;
+import coachless.GameSessionFramework.Network.JoinClient;
 
 import java.io.IOException;
 

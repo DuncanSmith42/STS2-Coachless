@@ -1,9 +1,9 @@
-package GameSessionFramework;
+package coachless.GameSessionFramework;
 
-import GameSessionFramework.session.GameSession;
-import GameSessionFramework.Network.HostServer;
-import GameSessionFramework.Network.JoinClient;
-import GameSessionFramework.session.GameCodeGenerator;
+import coachless.GameSessionFramework.session.GameSession;
+import coachless.GameSessionFramework.Network.HostServer;
+import coachless.GameSessionFramework.Network.JoinClient;
+import coachless.GameSessionFramework.session.GameCodeGenerator;
 
 import java.io.IOException;
 import java.util.ArrayList;

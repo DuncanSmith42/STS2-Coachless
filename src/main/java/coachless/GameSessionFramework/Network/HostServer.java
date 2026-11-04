@@ -1,10 +1,10 @@
-package GameSessionFramework.Network;
+package coachless.GameSessionFramework.Network;
 
 
-import GameSessionFramework.session.InvalidCodeException;
-import GameSessionFramework.session.SessionException;
-import GameSessionFramework.Player;
-import GameSessionFramework.session.GameSession;
+import coachless.GameSessionFramework.session.InvalidCodeException;
+import coachless.GameSessionFramework.session.SessionException;
+import coachless.GameSessionFramework.Player;
+import coachless.GameSessionFramework.session.GameSession;
 
 import java.io.BufferedReader;
 import java.io.IOException;

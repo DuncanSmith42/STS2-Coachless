@@ -1,8 +1,8 @@
-package GameSessionFramework;
+package coachless.GameSessionFramework;
 
-import GameSessionFramework.session.GameSession;
-import GameSessionFramework.Network.HostServer;
-import GameSessionFramework.session.GameCodeGenerator;
+import coachless.GameSessionFramework.session.GameSession;
+import coachless.GameSessionFramework.Network.HostServer;
+import coachless.GameSessionFramework.session.GameCodeGenerator;
 import java.net.InetAddress;
 import java.util.UUID;
 
