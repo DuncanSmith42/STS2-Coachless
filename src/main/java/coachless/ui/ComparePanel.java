@@ -5,7 +5,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.util.Map;
 
-// One rounded card per stat: your value vs global, with bars and a +/- badge.
 public class ComparePanel extends JPanel {
     private static final Color YOU = new Color(0x7C9CFF);
     private static final Color GLOBAL = new Color(0x5B6178);

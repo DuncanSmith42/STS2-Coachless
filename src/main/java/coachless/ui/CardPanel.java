@@ -6,7 +6,6 @@ import coachless.data.SaveQueries;
 import java.util.ArrayList;
 import java.util.List;
  
-/** Pick rate and win rate for every card (all characters together). */
 public class CardPanel extends TablePanel {
     public CardPanel(SaveFileManager saves) {
         super(saves,

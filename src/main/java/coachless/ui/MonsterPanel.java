@@ -6,7 +6,6 @@ import coachless.data.SaveQueries;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Which fights end your runs. Filter by character with the dropdown. */
 public class MonsterPanel extends TablePanel {
     public MonsterPanel(SaveFileManager saves) {
         super(saves,

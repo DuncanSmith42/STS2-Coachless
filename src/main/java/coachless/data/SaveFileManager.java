@@ -22,7 +22,6 @@ import java.util.stream.Stream;
 
 
 public final class SaveFileManager {
-
     //One folder the user gives us, plus what we got out of it
     public static final class Entry {
         public final Path path;
