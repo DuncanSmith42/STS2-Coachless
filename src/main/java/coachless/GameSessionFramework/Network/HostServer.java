@@ -1,10 +1,9 @@
 package coachless.GameSessionFramework.Network;
 
-
-import coachless.GameSessionFramework.session.InvalidCodeException;
-import coachless.GameSessionFramework.session.SessionException;
 import coachless.GameSessionFramework.Player;
 import coachless.GameSessionFramework.session.GameSession;
+import coachless.GameSessionFramework.session.InvalidCodeException;
+import coachless.GameSessionFramework.session.SessionException;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -13,6 +12,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -21,23 +21,42 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-
- //client -> host:  JOIN <code> <name>
- //host -> client:  OK <playerId> or ERROR <reason>
- //host -> everyone: LOBBY name1,name2,...   (whenever someone joins)
-
+/*
+ * Runs inside the host's app. One text line per message:
+ *   client -> host:   JOIN <code> <name>
+ *   host -> client:   OK <playerId>   or   ERROR <reason>
+ *   host -> everyone: LOBBY name1,name2,...   (whenever someone joins or leaves)
+ *   both directions:  PING every 5s (heartbeat; 15s of silence = disconnected)
+ *   host -> everyone: CLOSED   (host ended the session)
+ */
 public class HostServer {
+
+    // How the host's app finds out what happened.
+    public interface Listener {
+        void onPlayersChanged(List<Player> players);
+        void onEvent(String message);
+    }
+
     private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final int HEARTBEAT_MS = 5000;
+    private static final int TIMEOUT_MS = 15000;
 
     private final GameSession session;
     private final int requestedPort;
-    private final Consumer<String> log;
+    private final Listener listener;
 
     private final ExecutorService pool = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r);
+        t.setDaemon(true);
+        return t;
+    });
+    private final ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r);
         t.setDaemon(true);
         return t;
@@ -49,27 +68,51 @@ public class HostServer {
     private ServerSocket serverSocket;
     private volatile boolean running;
 
-    //Pass port 0 to let the OS pick a free port
-    public HostServer(GameSession session, int port, Consumer<String> log) {
+    // Pass port 0 to let the OS pick a free port
+    public HostServer(GameSession session, int port, Listener listener) {
         this.session = session;
         this.requestedPort = port;
-        this.log = log;
+        this.listener = listener;
     }
 
-    // start the server
+    // Simpler version: just log text (used by HostMain / SessionDemo)
+    public HostServer(GameSession session, int port, Consumer<String> log) {
+        this(session, port, new Listener() {
+            @Override
+            public void onPlayersChanged(List<Player> players) {
+            }
+
+            @Override
+            public void onEvent(String message) {
+                log.accept(message);
+            }
+        });
+    }
+
     public void start() throws IOException {
         serverSocket = new ServerSocket(requestedPort);
         running = true;
         pool.submit(this::acceptLoop);
+        heartbeat.scheduleAtFixedRate(() -> {
+            for (PrintWriter w : clients) {
+                w.println("PING");
+            }
+        }, HEARTBEAT_MS, HEARTBEAT_MS, TimeUnit.MILLISECONDS);
     }
 
-    // get the port #
     public int getPort() {
         return serverSocket.getLocalPort();
     }
 
     public void stop() {
+        if (!running) {
+            return;
+        }
         running = false;
+        heartbeat.shutdownNow();
+        for (PrintWriter w : clients) {
+            w.println("CLOSED");
+        }
         try {
             serverSocket.close();
         } catch (IOException ignored) {
@@ -91,7 +134,7 @@ public class HostServer {
                 pool.submit(() -> handle(socket));
             } catch (IOException e) {
                 if (running) {
-                    log.accept("Accept error: " + e.getMessage());
+                    listener.onEvent("Accept error: " + e.getMessage());
                 }
             }
         }
@@ -100,7 +143,11 @@ public class HostServer {
     private void handle(Socket socket) {
         String ip = socket.getInetAddress().getHostAddress();
         PrintWriter out = null;
+        Player player = null;           // set once this connection has joined
+        String reason = "disconnected";
         try {
+            // Applies to every read: a client that goes silent for 15s is treated as gone
+            socket.setSoTimeout(TIMEOUT_MS);
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             out = new PrintWriter(
@@ -114,37 +161,47 @@ public class HostServer {
 
             String line = in.readLine();
             String[] parts = line == null ? new String[0] : line.split(" ", 3);
-            if (parts.length < 3 || !parts[0].equals("JOIN") || parts[2].isBlank()) {
+            // commas are removed because LOBBY messages use them to separate names
+            String name = parts.length < 3 ? "" : parts[2].trim().replace(",", "");
+            if (parts.length < 3 || !parts[0].equals("JOIN") || name.isBlank()) {
                 out.println("ERROR Bad request");
                 return;
             }
 
-            Player player = new Player(UUID.randomUUID().toString(), parts[2].trim());
+            Player candidate = new Player(UUID.randomUUID().toString(), name);
             try {
-                session.join(parts[1], player);
+                session.join(parts[1], candidate);
             } catch (InvalidCodeException e) {
                 failures.incrementAndGet();
-                log.accept("Rejected join from " + ip + ": " + e.getMessage());
+                listener.onEvent("Rejected join from " + ip + ": " + e.getMessage());
                 out.println("ERROR " + e.getMessage());
                 return;
             } catch (SessionException e) {
-                log.accept("Rejected join from " + ip + ": " + e.getMessage());
+                listener.onEvent("Rejected join from " + ip + ": " + e.getMessage());
                 out.println("ERROR " + e.getMessage());
                 return;
             }
+            player = candidate;
 
             out.println("OK " + player.id());
             clients.add(out);
-            log.accept(player.name() + " joined (" + session.getPlayers().size()
+            listener.onEvent(player.name() + " joined (" + session.getPlayers().size()
                     + "/" + GameSession.MAX_PLAYERS + ")");
-            broadcastLobby();
+            playersChanged();
 
-            // Stay connected. Game-state messages from this player get handled here later.
-            while (in.readLine() != null) {
-                // nothing yet
+            // Stay connected. Any line counts as "still alive".
+            String msg;
+            while ((msg = in.readLine()) != null) {
+                if (msg.equals("PING")) {
+                    continue;
+                }
+                // Game-state messages from this player get handled here later.
             }
+            reason = "left the session";
+        } catch (SocketTimeoutException e) {
+            reason = "timed out";
         } catch (IOException e) {
-            // client dropped; nothing to do yet (FR-4.3 handles real disconnect logic)
+            reason = "connection lost";
         } finally {
             if (out != null) {
                 clients.remove(out);
@@ -153,7 +210,19 @@ public class HostServer {
                 socket.close();
             } catch (IOException ignored) {
             }
+            sockets.remove(socket);
+            // running == false means the host is shutting everything down, so skip the noise
+            if (player != null && running) {
+                session.removePlayer(player);
+                listener.onEvent(player.name() + " left (" + reason + ")");
+                playersChanged();
+            }
         }
+    }
+
+    private void playersChanged() {
+        listener.onPlayersChanged(session.getPlayers());
+        broadcastLobby();
     }
 
     private void broadcastLobby() {
