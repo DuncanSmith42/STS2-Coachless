@@ -1,11 +1,13 @@
 package coachless;
 
+import coachless.data.CurrentRunFileType;
 import coachless.data.GlobalStats;
 import coachless.data.PersonalStats;
 import coachless.data.SaveFileManager;
 import coachless.ui.ComparePanel;
 import coachless.ui.LivePanel;
 import coachless.ui.SourcesBar;
+import coachless.ui.MapPanel;
 import coachless.ui.CardPanel;
 import coachless.ui.MonsterPanel;
 import coachless.data.ProgressFileType;
@@ -19,16 +21,17 @@ public class MainFrame extends JFrame {
     public MainFrame() {
         super("STS Coachless");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setPreferredSize(new Dimension(900, 600));
+        setPreferredSize(new Dimension(1280, 720));
 
-        SaveFileManager saves = new SaveFileManager(new ProgressFileType());
+        SaveFileManager saves = new SaveFileManager(new ProgressFileType(), new CurrentRunFileType());
         PersonalStats personal = new PersonalStats(saves);
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Compare", new ComparePanel(personal, new GlobalStats()));
         tabs.addTab("Monsters", new MonsterPanel(saves));
         tabs.addTab("Cards", new CardPanel(saves));
-        tabs.addTab("Live Run", new LivePanel());
+        tabs.addTab("Live Run", new LivePanel(saves));
+        tabs.addTab("Map", new MapPanel(saves));
 
         add(new SourcesBar(saves), BorderLayout.NORTH);
         add(tabs, BorderLayout.CENTER);

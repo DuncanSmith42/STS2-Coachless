@@ -1,24 +1,28 @@
 package coachless.ui;
 
 import coachless.GameSessionFramework.session.GameSession;
-import coachless.data.RunFileWatcher;
+import coachless.data.CurrentRun;
+import coachless.data.Names;
+import coachless.data.SaveFileManager;
 import coachless.multiplayer.MultiplayerController;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
+
 public class LivePanel extends JPanel implements MultiplayerController.Listener {
+    private static final Color ACCENT = new Color(0x7C9CFF);
 
-    private final JLabel status = new JLabel("No run file selected");
-    private final JTextArea output = new JTextArea();
-    private RunFileWatcher watcher;
+    private final SaveFileManager saves;
+    private final JLabel runLine = new JLabel(" ");
+    private final JLabel status = new JLabel(" ");
+    private final PotionCard potion = new PotionCard();
 
-    //  multiplayer 
+    // ---- multiplayer ----
     private static final String CARD_OFF = "off";
     private static final String CARD_SETUP = "setup";
     private static final String CARD_SESSION = "session";
@@ -46,46 +50,128 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
     private final JList<String> playersList = new JList<>(playersModel);
     private String inviteText = "";
 
-    public LivePanel() {
-        super(new BorderLayout(8, 8));
-        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+    public LivePanel(SaveFileManager saves) {
+        super(new BorderLayout(0, 16));
+        this.saves = saves;
+        setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
 
-        JButton choose = new JButton("Choose run file...");
-        choose.addActionListener(e -> chooseFile());
+        JLabel title = new JLabel("Live Run");
+        title.putClientProperty("FlatLaf.styleClass", "h1");
+        status.setForeground(UIManager.getColor("Label.disabledForeground"));
 
-        JPanel top = new JPanel(new BorderLayout(8, 0));
-        top.add(choose, BorderLayout.WEST);
-        top.add(status, BorderLayout.CENTER);
+        JPanel header = new JPanel(new GridLayout(3, 1));
+        header.setOpaque(false);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
+        header.add(title);
+        header.add(runLine);
+        header.add(status);
 
-        output.setEditable(false);
-        output.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        potion.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
+        JPanel multi = buildMultiplayerPanel();
 
-        JPanel north = new JPanel(new BorderLayout(0, 8));
-        north.add(top, BorderLayout.NORTH);
-        north.add(buildMultiplayerPanel(), BorderLayout.CENTER);
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setOpaque(false);
+        for (JComponent c : new JComponent[] { header, potion, multi }) {
+            c.setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        content.add(header);
+        content.add(Box.createVerticalStrut(16));
+        content.add(potion);
+        content.add(Box.createVerticalStrut(16));
+        content.add(multi);
 
-        add(north, BorderLayout.NORTH);
-        add(new JScrollPane(output), BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(content);
+        scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.getViewport().setOpaque(false);
+        scroll.setOpaque(false);
+        add(scroll, BorderLayout.CENTER);
+
+        saves.addListener(this::refresh);
+        refresh();
+    }
+
+    private void refresh() {
+        CurrentRun run = CurrentRun.latest(saves);
+        if (run == null) {
+            runLine.setText(" ");
+            status.setText("No active run found. Add the folder that holds current_run.save.");
+            potion.show("Potion chance", "-", "Shows up once a run is in progress.", "", Double.NaN);
+            return;
+        }
+
+        String act = "Act " + (run.actIndex + 1) + " (" + Names.PrettyPrint(run.actId) + ")";
+        runLine.setText(Names.PrettyPrint(run.characterId) + "  -  Ascension " + run.ascension + "  -  " + act
+                + "  -  HP " + run.hp + "/" + run.maxHp + "  -  Gold " + run.gold);
+
+        CurrentRun.Point here = run.currentPoint();
+        String type = here == null ? "" : here.type();
+        switch (run.phase()) {
+            case REWARDS:
+                status.setText("Fight finished - reward screen open");
+                break;
+            case IN_ROOM:
+                status.setText("In a room: " + roomName(type));
+                break;
+            default:
+                status.setText("On the map (last room: " + roomName(type) + ")");
+        }
+
+        updatePotionCard(run, type);
+    }
+
+    private void updatePotionCard(CurrentRun run, String type) {
+        double normal = run.potionChance(false);
+        double elite = run.potionChance(true);
+        if (Double.isNaN(normal)) {
+            potion.show("Potion chance", "-", "This save file doesn't have the potion chance.", "", Double.NaN);
+            return;
+        }
+        String both = "Normal fight " + fmt(normal) + "    -    Elite fight " + fmt(elite);
+
+        switch (run.phase()) {
+            case REWARDS:
+                // The game updates chance after the reward screen
+                potion.show("Fight finished", "Rewards pending",
+                        "The chance updates after the reward screen (it was " + fmt(normal) + " before this fight).",
+                        "Next fight: " + fmt(clamp(normal + 0.10)) + " if no potion dropped, "
+                                + fmt(clamp(normal - 0.10)) + " if one did.",
+                        Double.NaN);
+                return;
+            case IN_ROOM:
+                switch (type) {
+                    case "monster":
+                        potion.show("This combat (normal fight)", fmt(normal),
+                                "Base chance from your recent fights.", both, normal);
+                        return;
+                    case "elite":
+                        potion.show("This combat (elite)", fmt(elite),
+                                "Base " + fmt(normal) + " + " + fmt(CurrentRun.ELITE_BONUS) + " elite bonus.",
+                                both, elite);
+                        return;
+                    case "boss":
+                        potion.show("This combat (boss)", fmt(normal),
+                                "Boss fights: any special rules aren't included.", both, normal);
+                        return;
+                    case "unknown":
+                        potion.show("This room (?)", fmt(normal),
+                                "If it turns out to be a fight, this is the normal-fight chance.", both, normal);
+                        return;
+                    default:
+                        potion.show("Next combat", fmt(normal),
+                                "This room isn't a fight. Chance for your next normal fight.", both, normal);
+                        return;
+                }
+            default:
+                potion.show("Next combat", fmt(normal),
+                        "Chance for your next normal fight. Elites get +" + fmt(CurrentRun.ELITE_BONUS) + ".",
+                        both, normal);
+        }
     }
 
 
-    private void chooseFile() {
-        JFileChooser fc = new JFileChooser();
-        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        Path p = fc.getSelectedFile().toPath();
-        if (watcher != null) watcher.stop();
-        status.setText("Watching: " + p);
-        watcher = new RunFileWatcher(p, text -> SwingUtilities.invokeLater(() -> onRunUpdate(text)));
-        watcher.start();
-    }
-
-    // Called on the Swing thread each time the run file changes.
-    private void onRunUpdate(String json) {
-        output.setText(json);
-        output.setCaretPosition(0);
-    }
-
-    // Multiplayer UI
+    // ================= Multiplayer UI =================
 
     private JPanel buildMultiplayerPanel() {
         ButtonGroup group = new ButtonGroup();
@@ -102,12 +188,13 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
         multiCards.show(multiArea, CARD_OFF);
 
         JPanel panel = new JPanel(new BorderLayout(0, 4));
+        panel.setOpaque(false);
         panel.add(modeRow, BorderLayout.NORTH);
         panel.add(multiArea, BorderLayout.CENTER);
         return panel;
     }
 
-    // host or join in multiplayer section
+    // host or join
     private JPanel buildSetupCard() {
         hostBtn.addActionListener(e -> onHostClicked());
         joinBtn.addActionListener(e -> onJoinClicked());
@@ -180,7 +267,7 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
         Integer port = readPort(hostPortField);
         if (name == null || port == null) return;
         try {
-            multiplayer.hostGame(name, port); //  onHosting() switches the card
+            multiplayer.hostGame(name, port); // onHosting() switches the card
         } catch (IOException ex) {
             showError("Could not start hosting: " + ex.getMessage());
         }
@@ -198,7 +285,7 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
         }
 
         joinBtn.setEnabled(false);
-        //not on swing thread because itoo slow
+        // not on the Swing thread because it is slow
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
@@ -263,6 +350,7 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
         JOptionPane.showMessageDialog(this, message, "Multiplayer", JOptionPane.ERROR_MESSAGE);
     }
 
+    // ---- MultiplayerController.Listener ----
 
     @Override
     public void onStatusChanged(String s) {
@@ -294,6 +382,82 @@ public class LivePanel extends JPanel implements MultiplayerController.Listener 
 
     @Override
     public void onMessageReceived(String message) {
-        
+        // not used yet
+    }
+
+    private static String roomName(String type) {
+        switch (type) {
+            case "monster": return "normal fight";
+            case "elite": return "elite fight";
+            case "boss": return "boss fight";
+            case "rest_site": return "rest site";
+            case "shop": return "shop";
+            case "treasure": return "treasure";
+            case "unknown": return "? room";
+            case "ancient": return "start (Neow / ancient)";
+            default: return "unknown";
+        }
+    }
+
+    private static double clamp(double v) { return Math.max(0, Math.min(1, v)); }
+
+    private static String fmt(double chance) {
+        if (Double.isNaN(chance)) return "-";
+        double pct = chance * 100;
+        return Math.abs(pct - Math.round(pct)) < 0.05
+                ? String.format("%d%%", Math.round(pct))
+                : String.format("%.1f%%", pct);
+    }
+
+    private static class PotionCard extends JPanel {
+        private String title = "", big = "", line1 = "", line2 = "";
+        private double fraction = Double.NaN;
+
+        PotionCard() {
+            setOpaque(false);
+            setPreferredSize(new Dimension(300, 200));
+        }
+
+        void show(String title, String big, String line1, String line2, double fraction) {
+            this.title = title;
+            this.big = big;
+            this.line1 = line1;
+            this.line2 = line2;
+            this.fraction = fraction;
+            repaint();
+        }
+
+        @Override protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setColor(UIManager.getColor("Panel.background").brighter());
+            g.fillRoundRect(0, 0, getWidth(), getHeight(), 20, 20);
+
+            int x = 24, w = getWidth() - 48;
+            Color muted = UIManager.getColor("Label.disabledForeground");
+            Color text = UIManager.getColor("Label.foreground");
+
+            g.setFont(getFont().deriveFont(Font.BOLD, 14f));
+            g.setColor(muted);
+            g.drawString("POTION CHANCE  -  " + title, x, 36);
+
+            g.setFont(getFont().deriveFont(Font.BOLD, 46f));
+            g.setColor(text);
+            g.drawString(big, x, 92);
+
+            if (!Double.isNaN(fraction)) {
+                g.setColor(new Color(0, 0, 0, 60));
+                g.fillRoundRect(x, 108, w, 10, 10, 10);
+                g.setColor(ACCENT);
+                g.fillRoundRect(x, 108, (int) (w * Math.max(0, Math.min(1, fraction))), 10, 10, 10);
+            }
+
+            g.setFont(getFont().deriveFont(13f));
+            g.setColor(muted);
+            g.drawString(line1, x, 146);
+            g.drawString(line2, x, 170);
+            g.dispose();
+        }
     }
 }

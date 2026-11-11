@@ -22,15 +22,18 @@ import java.util.stream.Stream;
 
 
 public final class SaveFileManager {
-    //One folder the user gives us, plus what we got out of it
+    //folder the user gives us, plus what we got out of it
     public static final class Entry {
         public final Path path;
         public final FileType type;
-        public ProgressSave data;
+        public Object data;
         public String error;
         long modified = Long.MIN_VALUE;
 
-        Entry(Path path, FileType type) { this.path = path; this.type = type; }
+        Entry(Path path, FileType type) { 
+            this.path = path; 
+            this.type = type; 
+        }
     }
 
     public static final class Folder {
@@ -38,7 +41,9 @@ public final class SaveFileManager {
         public final List<Entry> files = new ArrayList<>();
         public String error;
 
-        Folder(Path path) { this.path = path; }
+        Folder(Path path) { 
+            this.path = path; 
+        }
     }
 
     private static final String PREF_KEY = "folders";
@@ -165,7 +170,7 @@ public final class SaveFileManager {
         return changed;
     }
 
-        private FileType typeOf(Path p) {
+    private FileType typeOf(Path p) {
         for (FileType t : types) if (t.matches(p)) return t;
         return null;
     }
@@ -173,7 +178,7 @@ public final class SaveFileManager {
     private void reload(Entry e) {
         try {
             e.modified = Files.getLastModifiedTime(e.path).toMillis();
-            e.data = ProgressSave.parse(Files.readString(e.path));
+            e.data = e.type.parse(e.path);
             e.error = null;
         } catch (Exception ex) {
             e.data = null;
